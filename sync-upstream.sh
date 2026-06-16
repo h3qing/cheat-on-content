@@ -1,25 +1,19 @@
 #!/usr/bin/env bash
 #
-# Pull upstream (XBuilderLAB/cheat-on-content) into this fork, keeping our additive
-# customization branch rebased on top. See SYNCING.md.
+# Pull upstream (XBuilderLAB/cheat-on-content) into this fork's main.
+# Our customizations live ON main and are additive (new dirs only), so this merge
+# stays conflict-free. See SYNCING.md.
 #
-# Usage: bash sync-upstream.sh [branch]   (default branch: feat/linkedin-session-adapter)
+# Usage: bash sync-upstream.sh
 set -euo pipefail
-
-BRANCH="${1:-feat/linkedin-session-adapter}"
 
 echo "→ fetching upstream"
 git fetch upstream
 
-echo "→ fast-forwarding main to upstream/main"
+echo "→ merging upstream/main into main"
 git checkout main
-git merge --ff-only upstream/main
-git push origin main
-
-echo "→ rebasing $BRANCH onto main"
-git checkout "$BRANCH"
-git rebase main
+git merge --no-edit upstream/main
 
 echo ""
-echo "✓ synced. Our additions replayed on top of upstream's latest."
-echo "  Review, then push:  git push --force-with-lease origin $BRANCH"
+echo "✓ merged upstream's latest into main (our additive dirs don't conflict)."
+echo "  Review, then push:  git push origin main"
