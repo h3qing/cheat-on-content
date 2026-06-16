@@ -8,9 +8,11 @@
 # ── 凭证 / 登录态：绝不提交（提交即等于泄露账号）──
 # .auth/ = 抖音 Playwright 登录态(含 sessionid)
 # .auth-xhs/ = 小红书 Playwright 登录态(含 web_session 等)
+# .auth-linkedin/ = LinkedIn Playwright 登录态(含 li_at)
 # .cheat-secrets.json = API key / cookie
 .auth/
 .auth-xhs/
+.auth-linkedin/
 .cheat-secrets.json
 
 # ── 本地缓存与生成物 ──

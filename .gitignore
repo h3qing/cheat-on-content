@@ -46,6 +46,7 @@ content.db
 # adapter 跑过留下的
 .auth/
 .auth-xhs/
+.auth-linkedin/
 .debug/
 
 # Editor / IDE
