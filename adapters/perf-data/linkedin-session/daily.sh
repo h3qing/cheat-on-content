@@ -19,7 +19,16 @@ if [[ ! -x "$PY" ]]; then
   exit 2
 fi
 
+JOBLOG="/Users/heqinghuang/Media/cheat-on-content/adapters/content-pipeline/joblog.py"
+START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') ====="
-"$PY" "$ADAPTER/review.py" pull
-"$PY" "$ADAPTER/review.py" posts --limit="$LIMIT"
+OUT="$( "$PY" "$ADAPTER/review.py" pull 2>&1; "$PY" "$ADAPTER/review.py" posts --limit="$LIMIT" 2>&1 )"
+RC=$?
+printf '%s\n' "$OUT"
 echo "===== done ====="
+
+# observability → job_runs (best-effort; never fails the run)
+STATUS=$([ "$RC" -eq 0 ] && echo success || echo failed)
+SUM="$(printf '%s\n' "$OUT" | grep -iE 'INSERT|impressions|error|❌|⚠' | tail -1)"
+[ -z "$SUM" ] && SUM="pull + posts (limit $LIMIT)"
+"$PY" "$JOBLOG" capture "$STATUS" "$START" "$SUM" "$RC" 2>/dev/null || true
