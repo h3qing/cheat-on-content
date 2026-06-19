@@ -44,3 +44,14 @@ def secrets_file(
 ) -> Path:
     # Supabase 落库阶段读这里：{"supabase_url": "...", "supabase_service_key": "..."}
     return runtime_project_root(env=env, cwd=cwd) / ".cheat-secrets.json"
+
+
+def videos_dir(
+    env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+) -> Path:
+    # /cheat-retro 内容复盘流：单帖分析 → report.md 落到这里（与 douyin/bilibili 同形）。
+    active_env = env if env is not None else os.environ
+    if active_env.get("CHEAT_VIDEOS_DIR"):
+        return Path(active_env["CHEAT_VIDEOS_DIR"]).expanduser().resolve()
+    return runtime_project_root(env=env, cwd=cwd) / "videos"

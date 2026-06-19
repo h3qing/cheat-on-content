@@ -7,6 +7,7 @@
     python review.py post <activity_id>   # DOM 抽取单帖分析（只打印）
     python review.py posts [--limit=N] [--dry-run]  # 最新 N 帖 → engagement_snapshots
     python review.py audience [--dry-run] # 受众分析 → audience_snapshots
+    python review.py video <id|url> [script.txt]  # 单帖分析 → NotebookLM 友好的 report.md
     python review.py discover [seconds]   # 发现 XHR 接口
 """
 from __future__ import annotations
@@ -14,13 +15,54 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 import crawler
+import renderer
+from paths import videos_dir
+
+
+def run_with_id(activity_raw: str, script_path: str | None) -> None:
+    """抓单帖分析 → 渲染 NotebookLM 友好的 report.md（/cheat-retro 的 `video` 契约）。"""
+    active_videos_dir = videos_dir()
+    active_videos_dir.mkdir(parents=True, exist_ok=True)
+    activity_id = crawler.extract_activity_id(activity_raw)
+
+    script = ""
+    if script_path:
+        p = Path(script_path).expanduser()
+        if p.is_file():
+            script = p.read_text(encoding="utf-8", errors="ignore")
+            print(f"稿子：{p.name}（{len(script)} 字符）")
+        else:
+            print(f"[警告] 找不到稿子 {p}")
+
+    print(f"[抓取] 帖子 activity:{activity_id}")
+    result = asyncio.run(crawler.fetch_all(activity_id))
+    post = result["post"]
+    if not post:
+        print("❌ 未抓到数据（多半是未登录）。先跑：python review.py login")
+        sys.exit(3)
+
+    out_dir = renderer.output_dir_for(post, active_videos_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if script:
+        (out_dir / "script.txt").write_text(script, encoding="utf-8")
+    md = renderer.render_report(post, script)
+    report = out_dir / "report.md"
+    report.write_text(md, encoding="utf-8")
+    print(f"\n✓ {report}")
 
 
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "login":
         asyncio.run(crawler.ensure_login())
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "video":
+        if len(sys.argv) < 3:
+            print("用法：python review.py video <activity_id_or_url> [script.txt]")
+            sys.exit(3)
+        run_with_id(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
         return
     if len(sys.argv) > 1 and sys.argv[1] == "discover":
         secs = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 180

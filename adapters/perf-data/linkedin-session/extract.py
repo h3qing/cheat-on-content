@@ -75,6 +75,11 @@ POST_METRICS = [
 
 _IMPRESSION_LABELS = ("インプレッション数", "Impressions")
 
+# 作者署名行的语言标记（"…さんが投稿しました • 4日" / "… posted this • 6d"）。
+_BYLINE_MARKERS = ("さんが投稿しました", "posted this")
+# 顶部指标段之前会出现的小标题（"Discovery" / "調査" 等）——正文与指标的分界。
+_BODY_END_MARKERS = ("調査", "Discovery", "ディスカバリー")
+
 
 def parse_post_summary(text: str) -> dict:
     """单帖分析 DOM 文本 → {'metrics': {...}}。支持 日/英（LinkedIn 随机切换）。
@@ -95,6 +100,44 @@ def parse_post_summary(text: str) -> dict:
             if 0 <= j < len(scan):
                 out[key] = _to_int(scan[j])
     return {"metrics": out}
+
+
+def parse_post_meta(text: str) -> dict:
+    """从单帖分析 DOM 抽作者署名 + 相对发布时间 + 正文。
+
+    版式（reading order）：署名行（"…さんが投稿しました • 4日" / "… posted this • 6d"）
+    → 正文若干行 → 顶部指标小标题（"Discovery"/"調査"）→ 指标段。
+    取署名行与小标题之间的行为正文；抽不到时各字段为空，不报错。
+    返回 {'author': str, 'age': str, 'text': str}。
+    """
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    byline_idx = None
+    for i, l in enumerate(lines):
+        if any(m in l for m in _BYLINE_MARKERS):
+            byline_idx = i
+            break
+    if byline_idx is None:
+        return {"author": "", "age": "", "text": ""}
+
+    byline = lines[byline_idx]
+    author, age = "", ""
+    if "•" in byline:
+        head, _, tail = byline.partition("•")
+        age = tail.strip()
+        author = head.strip()
+    else:
+        author = byline.strip()
+    for marker in _BYLINE_MARKERS:
+        if marker in author:
+            author = author.split(marker, 1)[0].strip()
+            break
+
+    body: list[str] = []
+    for l in lines[byline_idx + 1:]:
+        if l in _IMPRESSION_LABELS or l in _BODY_END_MARKERS:
+            break
+        body.append(l)
+    return {"author": author, "age": age, "text": "\n".join(body).strip()}
 
 
 # 受众分析页（/analytics/creator/audience/）。demographics 区按 "%" 锚点解析（语言无关），
