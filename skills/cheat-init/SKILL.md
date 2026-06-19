@@ -141,11 +141,12 @@ allowed-tools: Bash(*), Read, Write, Edit, Glob, WebFetch, Skill
 > b) 小红书 — 装 xhs-explore adapter（Playwright + 扫码登录小红书创作者中心）
 > c) YouTube — 装 youtube-data-api adapter（需 API key）
 > d) B 站 — bilibili-stat adapter
-> e) 其他 / 多平台 — 走 manual paste 模式"
+> e) LinkedIn — 装 linkedin-session adapter（Playwright + 登录 LinkedIn，抓单帖分析）
+> f) 其他 / 多平台 — 走 manual paste 模式"
 
-如选 a/b/c/d → 询问 Q2.2；如选 e → 跳到 Q2.3 manual。
+如选 a/b/c/d/e → 询问 Q2.2；如选 f → 跳到 Q2.3 manual。
 
-**Q2.2: adapter 安装时机**（仅 Q2.1=a/b/c/d）
+**Q2.2: adapter 安装时机**（仅 Q2.1=a/b/c/d/e）
 
 > "现在装 adapter 自动抓取，还是先手动告诉我？
 > - 现在装 — 引导你装 Playwright + 扫码 → 抓回最近 N 条数据
@@ -240,9 +241,9 @@ allowed-tools: Bash(*), Read, Write, Edit, Glob, WebFetch, Skill
 
 你能找一个对标账号吗？至少 3 条该账号的视频。
 
-  - 你**完全没发过历史**（Q2=a/b）→ **强烈建议**——rubric 没 anchor 全靠对标。
+  - 你**完全没发过历史**（Q2=a）→ **强烈建议**——rubric 没 anchor 全靠对标。
     不找的话用通用 v0 等权 rubric，前 5 篇精度更差更久
-  - 你**已发历史**（Q2=c）→ **可选**——你也可以只用自己历史 calibrate；
+  - 你**已发历史**（Q2=b）→ **可选**——你也可以只用自己历史 calibrate；
     但建议至少导 1 个对标做 sanity check（看你账号是否真的偏离对标方向）
 
 a) 现在找 → 立刻进入 /cheat-learn-from（5-15 分钟，看你材料准备程度）
@@ -262,6 +263,21 @@ c) 不找 → state 标 `benchmark_status: none`，用通用 v0 起步
 ### Phase 3: 创建脚手架（逐项解释）
 
 按顺序创建并**解释每一项的作用**：
+
+0. **`.gitignore`（安全 — 必须第一步创建）**
+   ```
+   "先创建 .gitignore，把账号凭证挡在版本控制外——这是第一件事。
+    .auth/ / .auth-xhs/ / .auth-linkedin/ 存的是抖音 / 小红书 / LinkedIn 的登录态（等同账号密码），
+    .cheat-secrets.json 存 API key / cookie——一旦被 commit 或云同步就等于泄露账号。
+    注意：predictions/ videos/ scripts/ 这些**不**忽略——原则 #1/#3 依赖
+    git history 作为预测的不可变档案，必须入库。"
+   ```
+   - 复制 `cheat-on-content/templates/gitignore.template` → `<user-repo>/.gitignore`
+   - 如 `<user-repo>/.gitignore` **已存在** → 不覆盖；逐行检查并**追加缺失行**，至少确保
+     `.auth/`、`.auth-xhs/`、`.auth-linkedin/`、`.cheat-secrets.json` 四行存在
+   - 即使用户项目当前**还不是 git 仓库**也照常创建——它会在用户 `git init` 的那一刻立即生效
+   - 创建后提醒一句：如果项目已经 `git init` 过且可能误加过 `.auth/`，让用户跑
+     `git rm -r --cached .auth .auth-xhs .auth-linkedin .cheat-secrets.json` 把已暂存的凭证移出
 
 1. **`.cheat-state.json`**
    ```
@@ -288,7 +304,7 @@ c) 不找 → state 标 `benchmark_status: none`，用通用 v0 起步
      "data_layer": "markdown",
      "hooks_installed": <查 Q5 映射表，写 bool true/false>,
      "enabled_trend_sources": ["manual-paste"],
-     "enabled_perf_adapters": <Q2.1=a→[\"douyin-session\"]；b→[\"xhs-explore\"]；c→[\"youtube-data-api\"]；d→[\"bilibili-stat\"]；其他→[]>,
+     "enabled_perf_adapters": <Q2.1=a→[\"douyin-session\"]；b→[\"xhs-explore\"]；c→[\"youtube-data-api\"]；d→[\"bilibili-stat\"]；e→[\"linkedin-session\"]；其他→[]>,
      "last_bump_at": null,
      "last_bump_self_audited": false,
      "last_published_at": null,
@@ -495,7 +511,7 @@ cheat-learn-from 完成后回到 init 的 Phase 5。
 
 | 字段 | 写入时机 | 来源 |
 |---|---|---|
-| `schema_version` | Phase 3 | 硬编码 "1.1" |
+| `schema_version` | Phase 3 | 硬编码 "1.4" |
 | `skill_version` | Phase 3 | 硬编码 "1.0.0" |
 | `rubric_version` | Phase 3 | "v0" |
 | `content_form` | Phase 3 | Q1 → 查映射表换 enum 值（**不是字母**） |
