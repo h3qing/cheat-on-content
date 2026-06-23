@@ -30,7 +30,43 @@ def test_bucket_boundaries():
     assert predict.bucket_of(0) == "<4k"
 
 
+def test_canonical_bucket_normalizes_dashes():
+    canon_mid = predict.bucket_of(13_291)  # "12–30k" — en-dash sourced from source-of-truth
+    # hyphen-minus and em-dash both fold to the canonical en-dash
+    assert predict._canonical_bucket("12-30k") == canon_mid
+    assert predict._canonical_bucket("12—30k") == canon_mid  # — = em-dash
+    # already-canonical and dashless labels pass through untouched
+    assert predict._canonical_bucket(canon_mid) == canon_mid
+    assert predict._canonical_bucket("30k+") == "30k+"
+    assert predict._canonical_bucket("<4k") == "<4k"
+    # a missing label is tolerated, not coerced
+    assert predict._canonical_bucket(None) is None
+
+
+def test_verdict_dash_insensitive():
+    # Regression for the 2026-06-24 settle: draft 16 / post 19 reached 13,291 impressions —
+    # a genuine 12–30k hit — but the stored predicted_bucket used a hyphen-minus ("12-30k")
+    # instead of the canonical en-dash. The old retro() recorded "miss" for it (and lost the
+    # under/over-predicted distinction) because == failed and LABELS.index() raised ValueError.
+    # _verdict() must settle hyphen-typed labels identically to their en-dash twins.
+    mid_high = predict.bucket_of(13_291)  # "12–30k" — canonical en-dash, straight from source
+    mid_low = predict.bucket_of(5_000)    # "4–12k"  — ditto, no hand-typed dash to get wrong
+
+    # hit: same bucket, only the dash differs
+    assert predict._verdict(mid_high, "12-30k") == "hit"
+    assert predict._verdict(mid_low, "4-12k") == "hit"
+    # under-predicted: bet the lower bucket (hyphen), reality landed higher
+    assert predict._verdict(mid_high, "4-12k") == "under-predicted"
+    # over-predicted: bet the higher bucket (hyphen), reality landed lower
+    assert predict._verdict(mid_low, "12-30k") == "over-predicted"
+    # canonical labels keep settling exactly as before
+    assert predict._verdict(mid_high, mid_high) == "hit"
+    assert predict._verdict(mid_low, mid_high) == "over-predicted"
+
+
 if __name__ == "__main__":
     test_composite_weights()
     test_bucket_boundaries()
+    test_canonical_bucket_normalizes_dashes()
+    test_verdict_dash_insensitive()
     print("✓ all predict.py unit tests passed")

@@ -55,6 +55,27 @@ def bucket_of(impressions: int) -> str:
     return "<4k"
 
 
+def _canonical_bucket(label):
+    """Normalize dash variants (hyphen-minus, em-dash) to the canonical en-dash used in
+    BUCKETS, so a hyphen-typed "12-30k" settles identically to the canonical "12–30k".
+    Returns the input unchanged when it's falsy (e.g. a missing/None label)."""
+    return label.replace("-", "–").replace("—", "–") if label else label
+
+
+def _verdict(actual_bucket: str, pred_bucket) -> str:
+    """Settle an actual reach bucket against a predicted one, returning hit /
+    under-predicted / over-predicted (or "miss" if a label isn't recognized). Dash-insensitive:
+    a hyphen-typed predicted_bucket settles identically to its canonical en-dash twin."""
+    actual_bucket = _canonical_bucket(actual_bucket)
+    pred_bucket = _canonical_bucket(pred_bucket)
+    try:
+        return "hit" if actual_bucket == pred_bucket else (
+            "under-predicted" if LABELS.index(actual_bucket) < LABELS.index(pred_bucket) else "over-predicted"
+        )
+    except ValueError:
+        return "hit" if actual_bucket == pred_bucket else "miss"
+
+
 def predict(bet: dict) -> dict:
     """Write one immutable blind prediction. Refuses to re-predict the same idea under the
     same rubric_version (principle #1: a prediction is written once, never rewritten)."""
@@ -80,7 +101,7 @@ def predict(bet: dict) -> dict:
         "rubric_version": version,
         "dimension_scores": bet["dimension_scores"],
         "composite": composite,
-        "predicted_bucket": bet.get("predicted_bucket") or bucket_of(0),
+        "predicted_bucket": _canonical_bucket(bet.get("predicted_bucket")) or bucket_of(0),
         "predicted_at": _now(),
         "notes": bet.get("notes"),
     }
@@ -125,13 +146,8 @@ def retro(post_idea_id: int) -> dict:
         raise SystemExit(f"❌ no engagement snapshot with impressions yet for post {post_id} — wait for capture.")
     actual = int(snaps[0]["impressions"])
     actual_bucket = bucket_of(actual)
-    pred_bucket = pred.get("predicted_bucket")
-    try:
-        verdict = "hit" if actual_bucket == pred_bucket else (
-            "under-predicted" if LABELS.index(actual_bucket) < LABELS.index(pred_bucket) else "over-predicted"
-        )
-    except ValueError:
-        verdict = "hit" if actual_bucket == pred_bucket else "miss"
+    pred_bucket = _canonical_bucket(pred.get("predicted_bucket"))
+    verdict = _verdict(actual_bucket, pred_bucket)
     client.table("predictions").update(
         {"actual_impressions": actual, "retro_at": _now(), "verdict": verdict, "post_id": post_id}
     ).eq("id", pred["id"]).execute()
