@@ -56,6 +56,7 @@ python "$ADAPTER/review.py" posts --limit=10       # 最新 10 帖 → engagemen
 python "$ADAPTER/review.py" posts --limit=5 --dry-run
 python "$ADAPTER/review.py" post <activity_id>     # 单帖，只打印
 python "$ADAPTER/review.py" audience [--dry-run]   # 受众画像 → audience_snapshots
+python "$ADAPTER/review.py" video <id|url> [script.txt]  # 单帖分析 → report.md（内容复盘，不落库）
 python "$ADAPTER/review.py" discover [seconds]     # XHR 发现器
 ```
 
@@ -66,6 +67,17 @@ python "$ADAPTER/review.py" discover [seconds]     # XHR 发现器
 0 9 * * * CHEAT_PROJECT_ROOT=$HOME/linkedin-tracker bash <本 repo>/adapters/perf-data/linkedin-session/daily.sh >> $HOME/linkedin-tracker/cron.log 2>&1
 ```
 帖数用 `LINKEDIN_POSTS_LIMIT` 环境变量覆盖（默认 10）。
+
+---
+
+## 内容复盘（→ `report.md`，不落库）
+
+除了上面的 Supabase 数据流，本 adapter 还实现 upstream 的内容复盘契约（与 douyin / bilibili 同形）：把一条帖子的单帖分析渲染成 NotebookLM 友好的 `report.md`（指标 + 派生比率 + 正文 + 你的原始稿子），供 `/cheat-retro` 复盘。和 Supabase 流共用同一份登录态（`.auth-linkedin/`）与 DOM parser，只是输出是 Markdown 文件而非数据库行。
+
+```bash
+python "$ADAPTER/review.py" video <activity_id|帖子链接> [script.txt]   # → videos/<date>_<id>_<author>/report.md
+bash   "$ADAPTER/run.sh"   <activity_id|链接> <video_folder> [script.txt]  # /cheat-retro 调用入口
+```
 
 ---
 
@@ -84,12 +96,14 @@ adapters/perf-data/linkedin-session/
 ├── README.md          # 本文件
 ├── requirements.txt   # playwright + supabase
 ├── paths.py           # .auth-linkedin / debug / secrets 路径
-├── crawler.py         # 登录 + 面板/单帖 DOM 抓取 + XHR 发现器
-├── extract.py         # DOM 文本 → 指标（双语 parser，纯函数）
-├── sink_supabase.py   # → profile_stats / engagement_snapshots（supabase-py）
-├── review.py          # CLI：login / pull / post / posts / discover
-├── test_extract.py    # parser 单测（合成数据，含 JP+EN）
+├── crawler.py         # 登录 + 面板/单帖/受众 DOM 抓取 + activity_id 解析 + XHR 发现器
+├── extract.py         # DOM 文本 → 指标 + 单帖 meta（双语 parser，纯函数）
+├── renderer.py        # 单帖分析 → NotebookLM 友好的 report.md（内容复盘流）
+├── sink_supabase.py   # → profile_stats / engagement_snapshots / audience_snapshots（supabase-py）
+├── review.py          # CLI：login / pull / post / posts / audience / video / discover
+├── test_extract.py    # parser 单测（合成数据，含 JP+EN + post_meta）
 ├── test_sink.py       # 行映射单测
 ├── schema.sql         # audience_snapshots 建表（其余表用账号已有的）
-└── daily.sh           # cron wrapper
+├── run.sh             # /cheat-retro 调用入口（→ report.md）
+└── daily.sh           # cron wrapper（Supabase 数据流）
 ```

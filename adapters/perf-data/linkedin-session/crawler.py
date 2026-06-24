@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from playwright.async_api import BrowserContext, Page, Response, async_playwright
 
 from paths import auth_dir, debug_dir, voyager_dump_dir
-from extract import parse_audience, parse_dashboard, parse_post_summary
+from extract import parse_audience, parse_dashboard, parse_post_meta, parse_post_summary
 
 FEED = "https://www.linkedin.com/feed/"
 DASHBOARD = "https://www.linkedin.com/dashboard/"
@@ -32,6 +33,24 @@ ANALYTICS_LANDING = {
 }
 
 VOYAGER_MARKERS = ("voyager/api", "/api/graphql")
+
+_ACTIVITY_RE = re.compile(r"urn:li:activity:(\d+)|activity[:-](\d+)|/(\d{15,25})\b")
+
+
+def extract_activity_id(raw: str) -> str:
+    """从帖子 URL 或裸 id 提取 activity_id。
+
+    支持裸 id（`7470493738918920193`）、帖子链接
+    （/feed/update/urn:li:activity:<id>/）、分析链接
+    （/analytics/post-summary/urn:li:activity:<id>/）。抽不出时原样返回（交上层报错）。
+    """
+    raw = raw.strip()
+    if raw.isdigit():
+        return raw
+    m = _ACTIVITY_RE.search(raw)
+    if m:
+        return next(g for g in m.groups() if g)
+    return raw
 
 
 class Session:
@@ -118,11 +137,14 @@ async def _scrape_post(page: Page, activity_id: str) -> dict:
     await page.goto(POST_SUMMARY.format(activity_id=activity_id),
                     wait_until="domcontentloaded", timeout=60000)
     await asyncio.sleep(7)
+    if "post-summary" not in page.url:
+        print(f"[post] ⚠ 可能被登出 / 重定向：{page.url}")
     txt = await page.inner_text("body")
     dbg = debug_dir()
     dbg.mkdir(parents=True, exist_ok=True)
     (dbg / f"post_{activity_id}.txt").write_text(txt, encoding="utf-8")
     result = parse_post_summary(txt)
+    result["meta"] = parse_post_meta(txt)
     result["activity_id"] = activity_id
     if result["metrics"].get("impressions") is None:
         print(f"[post] ⚠ {activity_id} 没抽到 impressions（看 {dbg}/post_{activity_id}.txt）")
@@ -161,6 +183,16 @@ async def fetch_post_summaries(activity_ids: list[str], headless: bool = True,
         return out
     finally:
         await sess.close()
+
+
+async def fetch_all(activity_id: str, headless: bool = True) -> dict:
+    """抓单帖分析（指标 + meta），返回 {'post': {...}} —— 对齐 review.py video 的渲染入口。"""
+    print(f"  → 打开单帖分析页 activity:{activity_id}")
+    post = await fetch_post_summary(activity_id, headless=headless)
+    if post:
+        m = post.get("metrics", {})
+        print(f"       impressions={m.get('impressions')} reactions={m.get('reactions')} comments={m.get('comments')}")
+    return {"post": post}
 
 
 async def fetch_audience(headless: bool = True) -> dict:

@@ -2,7 +2,7 @@
 
 跑：python test_extract.py
 """
-from extract import _to_int, parse_audience, parse_dashboard, parse_post_summary
+from extract import _to_int, parse_audience, parse_dashboard, parse_post_meta, parse_post_summary
 
 # 合成样本：复刻真实 /dashboard/ 的 inner_text 版式，但数字是假的
 SAMPLE = """0 notifications total
@@ -191,6 +191,29 @@ def test_parse_audience():
     assert d["industry"]["pct"] == 18.0, d
     assert d["job_title"]["bucket"] == "ソフトウェアエンジニア", d
     assert d["company"] == {"bucket": "Scale AI", "pct": 4.0}, d
+
+
+def test_parse_post_meta_jp():
+    meta = parse_post_meta(POST_SAMPLE)
+    assert meta["author"] == "Heqing Huang", meta
+    assert meta["age"] == "4日", meta
+    assert "post body with a stray number 123" in meta["text"], meta
+    # 正文不应吃进指标小标题 / 指标
+    assert "調査" not in meta["text"], meta
+    assert "インプレッション数" not in meta["text"], meta
+
+
+def test_parse_post_meta_en():
+    meta = parse_post_meta(POST_SAMPLE_EN)
+    assert meta["author"] == "Heqing Huang", meta
+    assert meta["age"] == "6d", meta
+    assert "post body text" in meta["text"], meta
+    assert "Discovery" not in meta["text"], meta
+
+
+def test_parse_post_meta_missing():
+    meta = parse_post_meta("no byline at all\njust text")
+    assert meta == {"author": "", "age": "", "text": ""}, meta
 
 
 if __name__ == "__main__":
