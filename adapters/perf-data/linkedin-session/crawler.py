@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,45 @@ FEED = "https://www.linkedin.com/feed/"
 DASHBOARD = "https://www.linkedin.com/dashboard/"
 POST_SUMMARY = "https://www.linkedin.com/analytics/post-summary/urn:li:activity:{activity_id}/"
 AUDIENCE = "https://www.linkedin.com/analytics/creator/audience/"
+
+# 单帖规范 id 是 urn:li:activity:<数字>；但帖子永久链接常给的是 urn:li:share:<数字>，
+# share 号和 activity 号**不是一个数**。把 share 号塞进 POST_SUMMARY 分析 URL 会静默失败
+# （“无法加载分析”页 + 全 null）。所以抓取/入库前先把任意永久链接归一成 activity id。
+ACTIVITY_URN_RE = re.compile(r"urn:li:activity:(\d+)")
+SHARE_URN_RE = re.compile(r"urn:li:share:(\d+)")
+BARE_ID_RE = re.compile(r"\d{6,}")
+
+
+def extract_activity_id(text: str) -> str | None:
+    """从帖子页 HTML/文本里挑出现频次最高的 urn:li:activity:<id>——就是帖子本身
+    （引用/转发块里的其它 activity id 出现次数少）。抽不到返回 None。"""
+    ids = ACTIVITY_URN_RE.findall(text or "")
+    if not ids:
+        return None
+    return Counter(ids).most_common(1)[0][0]
+
+
+def activity_id_from_ref(ref: str) -> str | None:
+    """免联网：ref 自身已含 urn:li:activity，或就是裸数字 id 时直接取出。
+    share urn / 不含 activity 的链接 → None（需 resolve_activity_id 联网解析）。"""
+    s = (ref or "").strip()
+    m = ACTIVITY_URN_RE.search(s)
+    if m:
+        return m.group(1)
+    if BARE_ID_RE.fullmatch(s):
+        return s
+    return None
+
+
+def _post_url_for(ref: str) -> str:
+    """把 share urn / 裸 id / 已是 URL 的 ref 归一成一个可加载的帖子 URL。"""
+    s = (ref or "").strip()
+    if s.startswith("http://") or s.startswith("https://"):
+        return s
+    if s.startswith("urn:li:"):
+        return f"https://www.linkedin.com/feed/update/{s}/"
+    return f"https://www.linkedin.com/feed/update/urn:li:share:{s}/"
+
 
 # 已知分析落地页：导航过去，拦截前端自动发的 voyager XHR。
 # 单帖 / 公司主页 URL 含动态 id —— 发现阶段靠 discover() 的人工导航窗口补齐。
@@ -64,6 +105,49 @@ class Session:
 async def _logged_in(ctx: BrowserContext) -> bool:
     cookies = await ctx.cookies("https://www.linkedin.com")
     return any(c["name"] == "li_at" for c in cookies)
+
+
+async def resolve_activity_id(permalink_or_urn: str, page: Page | None = None,
+                              headless: bool = True) -> str | None:
+    """永久链接（urn:li:share:<id> 或 feed/update/... URL）→ 规范 activity id 数字。
+
+    ref 已含 activity urn 时直接返回（免联网）。否则在 Session 里加载帖子页，取 HTML 里
+    出现频次最高的 urn:li:activity:<id>（即帖子本身）。传入 page 复用现有会话；不传则自开
+    一个 headless 会话（需已登录）。解析不到返回 None。
+    """
+    direct = ACTIVITY_URN_RE.search(permalink_or_urn or "")
+    if direct:
+        return direct.group(1)
+
+    url = _post_url_for(permalink_or_urn)
+    own_session = page is None
+    sess = None
+    try:
+        if own_session:
+            sess = await Session.open(headless=headless)
+            if not await _logged_in(sess.ctx):
+                print("[resolve] 未登录。先跑：python review.py login")
+                return None
+            page = await sess.ctx.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await asyncio.sleep(4)
+        activity_id = extract_activity_id(await page.content())
+        if activity_id is None:
+            print(f"[resolve] ⚠ 没能从 {url} 解析出 activity id（页面结构变了？）")
+        return activity_id
+    finally:
+        if own_session and sess is not None:
+            await sess.close()
+
+
+async def normalize_to_activity_id(ref: str, page: Page | None = None,
+                                   headless: bool = True) -> str | None:
+    """抓取前把任意帖子 ref 归一成 activity id：能免联网就免（activity urn / 裸 id），
+    否则（share urn / 永久链接）联网 resolve。"""
+    local = activity_id_from_ref(ref)
+    if local is not None:
+        return local
+    return await resolve_activity_id(ref, page=page, headless=headless)
 
 
 async def ensure_login(timeout_s: int = 300) -> bool:
@@ -129,22 +213,32 @@ async def _scrape_post(page: Page, activity_id: str) -> dict:
     return result
 
 
-async def fetch_post_summary(activity_id: str, headless: bool = True) -> dict:
-    """DOM 抽取单帖分析（/analytics/post-summary/）。仅本人帖子可看。"""
+async def fetch_post_summary(ref: str, headless: bool = True) -> dict:
+    """DOM 抽取单帖分析（/analytics/post-summary/）。仅本人帖子可看。
+
+    ref 可为裸 activity id / urn:li:activity / urn:li:share / 帖子永久链接——抓取前先归一
+    成 activity id（share urn 会联网解析，避免把 share 号塞进分析 URL 导致全 null）。"""
     sess = await Session.open(headless=headless)
     try:
         if not await _logged_in(sess.ctx):
             print("[post] 未登录。先跑：python review.py login")
             return {}
         page = await sess.ctx.new_page()
+        activity_id = await normalize_to_activity_id(ref, page=page)
+        if activity_id is None:
+            print(f"[post] ⚠ 无法从 {ref} 解析出 activity id")
+            return {}
         return await _scrape_post(page, activity_id)
     finally:
         await sess.close()
 
 
-async def fetch_post_summaries(activity_ids: list[str], headless: bool = True,
+async def fetch_post_summaries(refs: list[str], headless: bool = True,
                                delay_s: float = 4.0) -> dict:
-    """一个会话里顺序抓多帖，帖间停顿（对 LinkedIn 温和些）。"""
+    """一个会话里顺序抓多帖，帖间停顿（对 LinkedIn 温和些）。
+
+    每个 ref 抓取前归一成 activity id（share urn / 永久链接会联网解析）。返回以**传入的
+    ref** 为 key——调用方按原 external_id 取回。归一失败的帖返回 {}（fail-safe，调用方跳过）。"""
     sess = await Session.open(headless=headless)
     out: dict = {}
     try:
@@ -152,12 +246,18 @@ async def fetch_post_summaries(activity_ids: list[str], headless: bool = True,
             print("[post] 未登录。先跑：python review.py login")
             return {}
         page = await sess.ctx.new_page()
-        for i, aid in enumerate(activity_ids):
+        for i, ref in enumerate(refs):
             if i:
                 await asyncio.sleep(delay_s)
-            out[aid] = await _scrape_post(page, aid)
-            m = out[aid]["metrics"]
-            print(f"  [{aid}] impressions={m.get('impressions')} eng={m.get('social_engagement')}")
+            activity_id = await normalize_to_activity_id(ref, page=page)
+            if activity_id is None:
+                print(f"  ⚠ 无法解析 {ref}，跳过")
+                out[ref] = {}
+                continue
+            out[ref] = await _scrape_post(page, activity_id)
+            m = out[ref]["metrics"]
+            tag = ref if activity_id == ref else f"{ref}→{activity_id}"
+            print(f"  [{tag}] impressions={m.get('impressions')} eng={m.get('social_engagement')}")
         return out
     finally:
         await sess.close()

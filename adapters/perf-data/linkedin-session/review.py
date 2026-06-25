@@ -4,7 +4,8 @@
     python review.py login                # 首次：弹出浏览器登录 LinkedIn（存 cookie）
     python review.py dashboard            # DOM 抽取创作者面板 4 指标（headless，只打印）
     python review.py pull [--dry-run]     # 抽取 → INSERT profile_stats（--dry-run 只打印不写）
-    python review.py post <activity_id>   # DOM 抽取单帖分析（只打印）
+    python review.py resolve <permalink-or-urn>  # 永久链接/share urn → 规范 activity id（登记前归一）
+    python review.py post <activity_id|permalink>  # DOM 抽取单帖分析（只打印；接受 URL/urn）
     python review.py posts [--limit=N] [--dry-run]  # 最新 N 帖 → engagement_snapshots
     python review.py audience [--dry-run] # 受众分析 → audience_snapshots
     python review.py discover [seconds]   # 发现 XHR 接口
@@ -47,9 +48,20 @@ def main() -> None:
         print(f"✓ 已 INSERT profile_stats（id={out.get('id')}）")
         print(json.dumps(out["row"], ensure_ascii=False, indent=2))
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "resolve":
+        if len(sys.argv) < 3:
+            print("用法：python review.py resolve <permalink-or-urn>")
+            return
+        # 登记前归一：永久链接/share urn → 规范 activity id，存这个数当 external_id。
+        activity_id = asyncio.run(crawler.resolve_activity_id(sys.argv[2]))
+        if not activity_id:
+            print("❌ 没解析出 activity id", file=sys.stderr)
+            sys.exit(1)
+        print(activity_id)
+        return
     if len(sys.argv) > 1 and sys.argv[1] == "post":
         if len(sys.argv) < 3:
-            print("用法：python review.py post <activity_id>")
+            print("用法：python review.py post <activity_id|permalink>")
             return
         result = asyncio.run(crawler.fetch_post_summary(sys.argv[2], headless=True))
         print(json.dumps(result, ensure_ascii=False, indent=2))

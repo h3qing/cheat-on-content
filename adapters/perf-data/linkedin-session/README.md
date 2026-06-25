@@ -54,7 +54,8 @@ python "$ADAPTER/review.py" pull                   # 面板 → profile_stats（
 python "$ADAPTER/review.py" pull --dry-run         # 只打印不写
 python "$ADAPTER/review.py" posts --limit=10       # 最新 10 帖 → engagement_snapshots
 python "$ADAPTER/review.py" posts --limit=5 --dry-run
-python "$ADAPTER/review.py" post <activity_id>     # 单帖，只打印
+python "$ADAPTER/review.py" resolve <permalink>    # 永久链接/share urn → 规范 activity id（登记前归一）
+python "$ADAPTER/review.py" post <activity_id|permalink>  # 单帖，只打印（接受 URL/urn）
 python "$ADAPTER/review.py" audience [--dry-run]   # 受众画像 → audience_snapshots
 python "$ADAPTER/review.py" discover [seconds]     # XHR 发现器
 ```
@@ -87,9 +88,10 @@ adapters/perf-data/linkedin-session/
 ├── crawler.py         # 登录 + 面板/单帖 DOM 抓取 + XHR 发现器
 ├── extract.py         # DOM 文本 → 指标（双语 parser，纯函数）
 ├── sink_supabase.py   # → profile_stats / engagement_snapshots（supabase-py）
-├── review.py          # CLI：login / pull / post / posts / discover
+├── review.py          # CLI：login / pull / resolve / post / posts / discover
 ├── test_extract.py    # parser 单测（合成数据，含 JP+EN）
 ├── test_sink.py       # 行映射单测
+├── test_crawler.py    # share→activity 归一单测（含假 page 异步集成测）
 ├── schema.sql         # audience_snapshots 建表（其余表用账号已有的）
 └── daily.sh           # cron wrapper
 ```
