@@ -49,3 +49,15 @@ STATUS=$([ "$RC" -eq 0 ] && echo success || echo failed)
 SUM="$(printf '%s\n' "$OUT" | grep -iE 'inserted|skipped|signal|error|denied|❌|⚠' | tail -1)"
 [ -z "$SUM" ] && SUM="$(printf '%s\n' "$OUT" | tail -1)"
 "$PY" "$ADAPTER/joblog.py" discover "$STATUS" "$START" "$SUM" "$RC" 2>/dev/null || true
+
+# seed the calendar with post suggestions for upcoming posting-days (deterministic, no Claude;
+# fills only empty future Tue/Thu slots from the freshly-discovered signals + evergreen pillars)
+echo "===== $(date '+%Y-%m-%d %H:%M:%S') seed-calendar ====="
+SEED_START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+SEED_OUT="$("$PY" "$ADAPTER/seed_calendar.py" 2>&1)"; SEED_RC=$?
+printf '%s\n' "$SEED_OUT"
+echo "===== done ====="
+SEED_STATUS=$([ "$SEED_RC" -eq 0 ] && echo success || echo failed)
+SEED_SUM="$(printf '%s\n' "$SEED_OUT" | grep -iE 'inserted|seeding|nothing|full|error' | tail -1)"
+[ -z "$SEED_SUM" ] && SEED_SUM="$(printf '%s\n' "$SEED_OUT" | tail -1)"
+"$PY" "$ADAPTER/joblog.py" seed-calendar "$SEED_STATUS" "$SEED_START" "$SEED_SUM" "$SEED_RC" 2>/dev/null || true
