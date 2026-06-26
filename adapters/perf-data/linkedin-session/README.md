@@ -60,6 +60,20 @@ python "$ADAPTER/review.py" audience [--dry-run]   # 受众画像 → audience_s
 python "$ADAPTER/review.py" discover [seconds]     # XHR 发现器
 ```
 
+## 复盘（被 cheat-retro 调用）
+
+`/cheat-retro` 在 `state.data_collection=adapter` + `platform=linkedin` 时自动调 `run.sh`，你一般不用手动跑。手动测试：
+
+```bash
+ADAPTER="<本 repo>/adapters/perf-data/linkedin-session"
+bash "$ADAPTER/run.sh" <activity_id|帖子URL> <video_folder> [script.txt]
+# 输出在 <video_folder>/report.md
+```
+
+第一个参数原样交给 crawler 归一（裸 activity id / `urn:li:activity` / `urn:li:share` / 永久链接都行，share→activity 会联网解析）。`renderer.py` 再把单帖分析渲染成 NotebookLM 友好的 `report.md`，直接写进 `<video_folder>`（不像 douyin/xhs 按标题自动命名——单帖分析页拿不到帖子标题）。
+
+> **评论限制**：LinkedIn 单帖分析页**只给评论数、不给评论正文**，`report.md` 只能标注评论数，由 cheat-retro 降级要求你手动粘 top 评论。和 douyin/xhs 不同（那两个能抓到评论正文）。
+
 ## 每日 cron
 
 `daily.sh` 跑 `pull` + `posts`。crontab 每天 9:00：
@@ -89,9 +103,12 @@ adapters/perf-data/linkedin-session/
 ├── extract.py         # DOM 文本 → 指标（双语 parser，纯函数）
 ├── sink_supabase.py   # → profile_stats / engagement_snapshots（supabase-py）
 ├── review.py          # CLI：login / pull / resolve / post / posts / discover
+├── renderer.py        # 单帖分析 → report.md（纯渲染 + run.sh 的抓取/渲染入口）
+├── run.sh             # cheat-retro Path B 调用的 wrapper（fetch → render → report.md）
 ├── test_extract.py    # parser 单测（合成数据，含 JP+EN）
 ├── test_sink.py       # 行映射单测
 ├── test_crawler.py    # share→activity 归一单测（含假 page 异步集成测）
+├── test_renderer.py   # render_report 单测（合成数据，纯函数）
 ├── schema.sql         # audience_snapshots 建表（其余表用账号已有的）
 └── daily.sh           # cron wrapper
 ```
