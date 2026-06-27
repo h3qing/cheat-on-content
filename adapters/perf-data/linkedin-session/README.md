@@ -7,6 +7,7 @@
 | 创作者面板（曝光/粉丝/主页访问/搜索出现） | `pull` | `profile_stats` | ✅ |
 | 单帖互动（impressions/reactions/comments/reposts…） | `posts` | `engagement_snapshots` | ✅ |
 | 受众画像（职位/地区/资历/行业/公司/规模） | `audience` | `audience_snapshots` | ✅ |
+| 逐人受众分类（学生/专业人士/创始人…） | `import-connections` / `followers` / `classify` | `audience_members` | ✅ |
 | 公司主页分析 | — | — | ⬜ 跳过（个人号无公司页） |
 
 > `engagement_snapshots.impressions` 正是 Cowork 老流程留空的列——本 adapter 补上。
@@ -56,8 +57,41 @@ python "$ADAPTER/review.py" posts --limit=10       # 最新 10 帖 → engagemen
 python "$ADAPTER/review.py" posts --limit=5 --dry-run
 python "$ADAPTER/review.py" resolve <permalink>    # 永久链接/share urn → 规范 activity id（登记前归一）
 python "$ADAPTER/review.py" post <activity_id|permalink>  # 单帖，只打印（接受 URL/urn）
-python "$ADAPTER/review.py" audience [--dry-run]   # 受众画像 → audience_snapshots
+python "$ADAPTER/review.py" audience [--dry-run]   # 受众画像（aggregate）→ audience_snapshots
 python "$ADAPTER/review.py" discover [seconds]     # XHR 发现器
+```
+
+### 逐人受众分类（audience_members）
+
+把每个连接/关注者归到 8 类（student / early_career / professional / leadership /
+recruiter_hr / educator / creator_media / other），存进 `audience_members`，**一人一行、
+profile_key 唯一**，所以爬一次就够，之后只增量补新人、不重爬。建表见 `schema.sql`。
+
+数据来源分两路：**连接**用 LinkedIn 官方导出（最稳，不爬）；**纯关注者**才爬列表页。
+
+```bash
+# ① 连接：Settings → Data privacy → Get a copy of your data → "Connections" → Connections.csv
+python "$ADAPTER/review.py" import-connections ~/Downloads/Connections.csv [--dry-run]
+
+# ② 纯关注者（CSV 看不到的人）：爬关注者列表
+python "$ADAPTER/review.py" followers [--max=5000] [--dry-run]
+
+# ③ 分类：确定性关键词规则先判，模糊的写成 worklist 交给 LLM
+python "$ADAPTER/review.py" classify [--dry-run]
+#    → 命中的直接写回 category；模糊行落到 .cheat-cache/.../classify_tail.json
+
+# ④ LLM tail：让 Claude 读 classify_tail.json，按 8 类打标成 [{profile_key,category},…]，写回
+python "$ADAPTER/review.py" set-categories labeled.json
+```
+
+> **hybrid 分类**：规则（`classify.py`，纯函数、可测）覆盖绝大多数 headline，零成本；
+> 只有规则判不了的模糊尾巴才交给 LLM（Claude 读 worklist 打标）——成本只花在尾巴上。
+> `import` / `followers` 只 upsert 身份列，**永不覆盖**已分类的 category（幂等、可反复重导）。
+
+受众构成查询：
+```sql
+select category, count(*) from audience_members group by category order by 2 desc;
+select relationship, count(*) from audience_members group by relationship;
 ```
 
 ## 复盘（被 cheat-retro 调用）
@@ -99,16 +133,19 @@ adapters/perf-data/linkedin-session/
 ├── README.md          # 本文件
 ├── requirements.txt   # playwright + supabase
 ├── paths.py           # .auth-linkedin / debug / secrets 路径
-├── crawler.py         # 登录 + 面板/单帖 DOM 抓取 + XHR 发现器
+├── crawler.py         # 登录 + 面板/单帖 DOM 抓取 + 关注者列表爬 + XHR 发现器
 ├── extract.py         # DOM 文本 → 指标（双语 parser，纯函数）
-├── sink_supabase.py   # → profile_stats / engagement_snapshots（supabase-py）
-├── review.py          # CLI：login / pull / resolve / post / posts / discover
+├── classify.py        # headline → 8 类（确定性关键词规则，纯函数）
+├── audience_members.py# Connections.csv 解析 + profile_key 归一（纯函数）
+├── sink_supabase.py   # → profile_stats / engagement_snapshots / audience_members（supabase-py）
+├── review.py          # CLI：login/pull/.../audience + import-connections/followers/classify/set-categories
 ├── renderer.py        # 单帖分析 → report.md（纯渲染 + run.sh 的抓取/渲染入口）
 ├── run.sh             # cheat-retro Path B 调用的 wrapper（fetch → render → report.md）
 ├── test_extract.py    # parser 单测（合成数据，含 JP+EN）
 ├── test_sink.py       # 行映射单测
+├── test_audience.py   # 分类规则 + CSV 解析 + 成员行映射单测
 ├── test_crawler.py    # share→activity 归一单测（含假 page 异步集成测）
 ├── test_renderer.py   # render_report 单测（合成数据，纯函数）
-├── schema.sql         # audience_snapshots 建表（其余表用账号已有的）
+├── schema.sql         # audience_snapshots + audience_members 建表（其余表用账号已有的）
 └── daily.sh           # cron wrapper
 ```
