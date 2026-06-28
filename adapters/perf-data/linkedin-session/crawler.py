@@ -25,6 +25,90 @@ FEED = "https://www.linkedin.com/feed/"
 DASHBOARD = "https://www.linkedin.com/dashboard/"
 POST_SUMMARY = "https://www.linkedin.com/analytics/post-summary/urn:li:activity:{activity_id}/"
 AUDIENCE = "https://www.linkedin.com/analytics/creator/audience/"
+FOLLOWERS = "https://www.linkedin.com/feed/followers/"
+
+# 关注者列表页没有可拦的分析 XHR，列表项也是 SSR 卡片——在浏览器里按 /in/ 锚点抽
+# 每张卡片的 姓名 + 副标题（headline）。结构脆弱，best-effort：抽不到就回空，不报错。
+_FOLLOWERS_JS = r"""
+() => {
+  const seen = new Set();
+  const out = [];
+  const skip = new Set(['Follow','Following','Message','Connect','Remove','Pending','Ignore']);
+  document.querySelectorAll('a[href*="/in/"]').forEach(a => {
+    const m = (a.href || '').match(/\/in\/([^\/?#]+)/);
+    if (!m) return;
+    const key = m[1];
+    if (seen.has(key)) return;
+    const card = a.closest('li') || a.closest('[data-view-name]') || a.parentElement;
+    if (!card) return;
+    const lines = (card.innerText || '').split('\n').map(s => s.trim()).filter(Boolean);
+    if (!lines.length) return;
+    seen.add(key);
+    const name = (a.innerText || '').trim() || lines[0];
+    let headline = '';
+    for (const l of lines) {
+      if (l === name || skip.has(l) || l.startsWith('•')) continue;
+      if (/^\d[\d,]*\s+(followers|mutual|connections)/i.test(l)) continue;
+      headline = l; break;
+    }
+    out.push({ profile_key: key, full_name: name || null, headline: headline || null, href: a.href });
+  });
+  return out;
+}
+"""
+
+
+async def fetch_followers(headless: bool = True, max_people: int = 5000,
+                          max_scrolls: int = 80, delay_s: float = 1.5) -> list[dict]:
+    """爬关注者列表（/feed/followers/）→ 成员行（relationship='follower'）。
+
+    边滚动边抽卡片，连续 3 轮无新增就停。best-effort + fail-safe：抽不到回 []。
+    headline 是从卡片副标题尽力解析的，可能为空——空的留给 classify 当模糊行。
+    """
+    sess = await Session.open(headless=headless)
+    try:
+        if not await _logged_in(sess.ctx):
+            print("[followers] 未登录。先跑：python review.py login")
+            return []
+        page = await sess.ctx.new_page()
+        await page.goto(FOLLOWERS, wait_until="domcontentloaded", timeout=60000)
+        await asyncio.sleep(5)
+        people: dict[str, dict] = {}
+        stagnant = 0
+        for _ in range(max_scrolls):
+            for p in await page.evaluate(_FOLLOWERS_JS):
+                if p.get("profile_key"):
+                    people.setdefault(p["profile_key"], p)
+            if len(people) >= max_people:
+                break
+            before = len(people)
+            try:
+                btn = page.get_by_role("button", name=re.compile("show more|もっと見る", re.I))
+                if await btn.count():
+                    await btn.first.click()
+            except Exception:
+                pass
+            await page.mouse.wheel(0, 20000)
+            await asyncio.sleep(delay_s)
+            stagnant = stagnant + 1 if len(people) == before else 0
+            if stagnant >= 3:
+                break
+        dbg = debug_dir()
+        dbg.mkdir(parents=True, exist_ok=True)
+        (dbg / "followers.json").write_text(
+            json.dumps(list(people.values()), ensure_ascii=False, indent=2), encoding="utf-8")
+        if not people:
+            print(f"[followers] ⚠ 没抽到关注者（结构可能变了，看 {dbg}/followers.json）")
+        return [{
+            "profile_key": k,
+            "full_name": v.get("full_name"),
+            "headline": v.get("headline"),
+            "company": None,
+            "relationship": "follower",
+            "raw": {"source": "followers_dom", "href": v.get("href")},
+        } for k, v in people.items()]
+    finally:
+        await sess.close()
 
 # 单帖规范 id 是 urn:li:activity:<数字>；但帖子永久链接常给的是 urn:li:share:<数字>，
 # share 号和 activity 号**不是一个数**。把 share 号塞进 POST_SUMMARY 分析 URL 会静默失败

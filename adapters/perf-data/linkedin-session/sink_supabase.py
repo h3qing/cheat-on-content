@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import collections
 import datetime as dt
 import json
 
@@ -129,3 +130,116 @@ def insert_audience_snapshot(result: dict) -> dict:
     resp = client.table("audience_snapshots").insert(row).execute()
     data = resp.data[0] if resp.data else {}
     return {"id": data.get("id"), "row": row, "data": resp.data}
+
+
+# ---- 受众成员（per-person）→ audience_members ----
+#
+# 设计：import / followers 只 upsert **身份列**（不含 category / classified_at），
+# 所以重复导入永不覆盖已分类的行。分类是单独一步（classify / set-categories）。
+
+_MEMBER_COLS = ("profile_key", "full_name", "headline", "company", "relationship", "raw")
+_CHUNK = 500  # PostgREST 单请求太大（几千行）会 ReadTimeout，分批写
+
+
+def build_member_row(member: dict) -> dict:
+    """成员 dict → audience_members 的 upsert 行（只取身份列）。纯函数，可测。"""
+    return {k: member.get(k) for k in _MEMBER_COLS if k in member}
+
+
+def _upsert_chunked(client, rows: list[dict], ignore_duplicates: bool = False) -> list:
+    """按 profile_key 分批 upsert，避免大 payload 超时。"""
+    out: list = []
+    for i in range(0, len(rows), _CHUNK):
+        out += (client.table("audience_members")
+                .upsert(rows[i:i + _CHUNK], on_conflict="profile_key",
+                        ignore_duplicates=ignore_duplicates)
+                .execute().data or [])
+    return out
+
+
+def upsert_members(client, members: list[dict], update: bool = True) -> list:
+    """按 profile_key upsert 成员身份列。
+
+    update=True（导入 connections）：冲突时更新 name/headline 等，category 不在 payload 里→保留。
+    update=False（爬 followers）：冲突时忽略（ignore_duplicates），避免把已有的 connection
+    降级成 follower，也不动其分类。
+    """
+    if not members:
+        return []
+    rows = [build_member_row(m) for m in members]
+    return _upsert_chunked(client, rows, ignore_duplicates=not update)
+
+
+def fetch_unclassified(client, limit: int | None = None, page: int = 1000) -> list:
+    """取还没分类（category is null）的成员，供 classify 步骤判定。
+
+    PostgREST 单次 select 默认上限 1000 行，所以按 range 翻页取全（否则大网络只分类前 1000）。
+    """
+    out: list = []
+    start = 0
+    while True:
+        batch = (client.table("audience_members")
+                 .select("profile_key,full_name,headline,company")
+                 .is_("category", "null")
+                 .range(start, start + page - 1)
+                 .execute().data or [])
+        out.extend(batch)
+        if limit and len(out) >= limit:
+            return out[:limit]
+        if len(batch) < page:
+            return out
+        start += page
+
+
+def apply_categories(client, items: list[dict]) -> list:
+    """写回分类：[{profile_key, category}, ...] → 更新 category + classified_at。
+
+    用 upsert(on_conflict=profile_key) 批量更新这两列，其它列不动。items 来自已存在的行。
+    """
+    if not items:
+        return []
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    rows = [{"profile_key": it["profile_key"], "category": it["category"],
+             "classified_at": now} for it in items if it.get("category")]
+    if not rows:
+        return []
+    return _upsert_chunked(client, rows)
+
+
+# ---- 受众构成时间序列 → audience_composition ----
+
+def fetch_all_members_lite(client, page: int = 1000) -> list:
+    """翻页取全体成员的 category + relationship（轻量，给 snapshot 计数用）。"""
+    out: list = []
+    start = 0
+    while True:
+        batch = (client.table("audience_members")
+                 .select("category,relationship")
+                 .range(start, start + page - 1)
+                 .execute().data or [])
+        out.extend(batch)
+        if len(batch) < page:
+            return out
+        start += page
+
+
+def build_composition_row(members: list[dict], captured_at: str | None = None) -> dict:
+    """成员列表 → audience_composition 行（按 category / relationship 计数）。纯函数，可测。"""
+    cats = collections.Counter((m.get("category") or "uncategorized") for m in members)
+    rels = collections.Counter((m.get("relationship") or "unknown") for m in members)
+    return {
+        "captured_at": captured_at or dt.datetime.now(dt.timezone.utc).isoformat(),
+        "total": len(members),
+        "connections": rels.get("connection", 0),
+        "followers": rels.get("follower", 0),
+        "by_category": dict(cats),
+        "raw": {"by_relationship": dict(rels)},
+    }
+
+
+def insert_composition(client, members: list[dict]) -> dict:
+    """把当下构成定格成一行 audience_composition。"""
+    row = build_composition_row(members)
+    resp = client.table("audience_composition").insert(row).execute()
+    data = resp.data[0] if resp.data else {}
+    return {"id": data.get("id"), "row": row}
