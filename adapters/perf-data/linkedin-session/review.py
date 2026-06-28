@@ -15,6 +15,7 @@
     python review.py followers [--max=N] [--dry-run]   # 爬关注者 → upsert（insert-only）
     python review.py classify [--limit=N] [--dry-run]  # 规则分类 + 导出模糊行给 LLM
     python review.py set-categories <labeled.json>     # 写回 LLM 标注 [{profile_key,category}]
+    python review.py snapshot [--dry-run]              # 把当下构成定格 → audience_composition（趋势）
 """
 from __future__ import annotations
 
@@ -204,6 +205,20 @@ def main() -> None:
         client = sink_supabase._client()
         out = sink_supabase.apply_categories(client, valid)
         print(f"✓ 写回 {len(out)} 行 category（输入 {len(items)} / 有效 {len(valid)}）")
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "snapshot":
+        dry = "--dry-run" in sys.argv
+        import sink_supabase
+        client = sink_supabase._client()
+        members = sink_supabase.fetch_all_members_lite(client)
+        row = sink_supabase.build_composition_row(members)
+        if dry:
+            print("[dry-run] 将 INSERT audience_composition（未写库）：")
+            print(json.dumps(row, ensure_ascii=False, indent=2))
+            return
+        out = sink_supabase.insert_composition(client, members)
+        print(f"✓ snapshot → audience_composition（id={out.get('id')}，total={row['total']}）")
+        print(json.dumps(row["by_category"], ensure_ascii=False, indent=2))
         return
     print(__doc__)
 

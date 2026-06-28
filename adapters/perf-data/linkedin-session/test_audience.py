@@ -4,7 +4,7 @@
 """
 from audience_members import parse_connections_csv, profile_key_from_url
 from classify import classify_row
-from sink_supabase import build_member_row
+from sink_supabase import build_composition_row, build_member_row
 
 
 # ---- profile_key_from_url ----
@@ -125,6 +125,23 @@ def test_build_member_row():
     assert "category" not in row
     assert "classified_at" not in row
     assert row["raw"]["connected_on"] == "01 Jan 2024"
+
+
+def test_build_composition_row():
+    members = [
+        {"category": "student", "relationship": "connection"},
+        {"category": "student", "relationship": "follower"},
+        {"category": "professional", "relationship": "connection"},
+        {"category": None, "relationship": "connection"},
+    ]
+    row = build_composition_row(members)
+    assert row["total"] == 4
+    assert row["connections"] == 3
+    assert row["followers"] == 1
+    assert row["by_category"]["student"] == 2
+    assert row["by_category"]["professional"] == 1
+    assert row["by_category"]["uncategorized"] == 1  # None → 'uncategorized'
+    assert row["raw"]["by_relationship"]["connection"] == 3
 
 
 if __name__ == "__main__":

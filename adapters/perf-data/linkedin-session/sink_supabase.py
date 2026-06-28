@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import collections
 import datetime as dt
 import json
 
@@ -203,3 +204,42 @@ def apply_categories(client, items: list[dict]) -> list:
     if not rows:
         return []
     return _upsert_chunked(client, rows)
+
+
+# ---- 受众构成时间序列 → audience_composition ----
+
+def fetch_all_members_lite(client, page: int = 1000) -> list:
+    """翻页取全体成员的 category + relationship（轻量，给 snapshot 计数用）。"""
+    out: list = []
+    start = 0
+    while True:
+        batch = (client.table("audience_members")
+                 .select("category,relationship")
+                 .range(start, start + page - 1)
+                 .execute().data or [])
+        out.extend(batch)
+        if len(batch) < page:
+            return out
+        start += page
+
+
+def build_composition_row(members: list[dict], captured_at: str | None = None) -> dict:
+    """成员列表 → audience_composition 行（按 category / relationship 计数）。纯函数，可测。"""
+    cats = collections.Counter((m.get("category") or "uncategorized") for m in members)
+    rels = collections.Counter((m.get("relationship") or "unknown") for m in members)
+    return {
+        "captured_at": captured_at or dt.datetime.now(dt.timezone.utc).isoformat(),
+        "total": len(members),
+        "connections": rels.get("connection", 0),
+        "followers": rels.get("follower", 0),
+        "by_category": dict(cats),
+        "raw": {"by_relationship": dict(rels)},
+    }
+
+
+def insert_composition(client, members: list[dict]) -> dict:
+    """把当下构成定格成一行 audience_composition。"""
+    row = build_composition_row(members)
+    resp = client.table("audience_composition").insert(row).execute()
+    data = resp.data[0] if resp.data else {}
+    return {"id": data.get("id"), "row": row}

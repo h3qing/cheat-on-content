@@ -94,6 +94,26 @@ select category, count(*) from audience_members group by category order by 2 des
 select relationship, count(*) from audience_members group by relationship;
 ```
 
+### 测量循环（接受请求后看年轻人占比有没有涨）
+
+`audience_members` 是当下快照（一人一行），看不出趋势。`snapshot` 把当下构成定格成
+一行 `audience_composition`，多次跑就有时间序列。每接受一批连接请求后跑一轮：
+
+```bash
+python "$ADAPTER/review.py" followers          # 新粉丝（已接受的连接会自动关注你）
+python "$ADAPTER/review.py" classify           # 给新人分类
+python "$ADAPTER/review.py" snapshot           # 定格当下构成 → 趋势
+```
+
+趋势查询（年轻人 = student + early_career 占比随时间）：
+```sql
+select captured_at, total,
+       (by_category->>'student')::int + coalesce((by_category->>'early_career')::int,0) as young,
+       round(100.0*((by_category->>'student')::int
+             + coalesce((by_category->>'early_career')::int,0))/total,1) as young_pct
+from audience_composition order by captured_at;
+```
+
 ## 复盘（被 cheat-retro 调用）
 
 `/cheat-retro` 在 `state.data_collection=adapter` + `platform=linkedin` 时自动调 `run.sh`，你一般不用手动跑。手动测试：

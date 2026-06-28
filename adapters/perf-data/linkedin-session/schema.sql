@@ -33,3 +33,22 @@ create table if not exists audience_members (
 -- 受众构成查询示例：
 --   select category, count(*) from audience_members group by category order by 2 desc;
 --   select relationship, count(*) from audience_members group by relationship;
+
+
+-- audience_composition：受众构成的时间序列快照（趋势用）。每次 snapshot 写一行，
+-- 把当下 audience_members 的分类计数定格下来，好看「学生/年轻人占比」随接受请求而上升。
+create table if not exists audience_composition (
+  id           bigint generated always as identity primary key,
+  captured_at  timestamptz not null default now(),
+  total        integer,
+  connections  integer,
+  followers    integer,
+  by_category  jsonb,   -- {student:80, professional:2247, ...}
+  raw          jsonb
+);
+
+-- 趋势查询示例（年轻人占比随时间）：
+--   select captured_at, total,
+--          (by_category->>'student')::int + coalesce((by_category->>'early_career')::int,0) as young,
+--          round(100.0*((by_category->>'student')::int + coalesce((by_category->>'early_career')::int,0))/total,1) as young_pct
+--   from audience_composition order by captured_at;
