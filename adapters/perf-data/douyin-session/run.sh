@@ -115,12 +115,14 @@ LATEST_REPORT=$(find "$( dirname "$VIDEO_FOLDER" )" -name "report.md" -newer "$V
 if [[ -n "$LATEST_REPORT" && "$( dirname "$LATEST_REPORT" )" != "$VIDEO_FOLDER" ]]; then
   # Move the autonamed folder's report into our canonical folder
   cp "$LATEST_REPORT" "$VIDEO_FOLDER/report.md"
-  # Optionally also copy script.txt if review.py wrote it
   AUTO_DIR=$( dirname "$LATEST_REPORT" )
+  # Optionally also copy script.txt if review.py wrote it
   if [[ -f "$AUTO_DIR/script.txt" ]]; then
     cp "$AUTO_DIR/script.txt" "$VIDEO_FOLDER/script.txt"
   fi
-  echo "[douyin-session] moved auto-named output to $VIDEO_FOLDER/"
+  # Clean up the auto-generated directory to avoid duplicates
+  rm -rf "$AUTO_DIR"
+  echo "[douyin-session] moved auto-named output and cleaned up $AUTO_DIR"
 fi
 
 if [[ ! -f "$VIDEO_FOLDER/report.md" ]]; then
