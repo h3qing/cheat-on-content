@@ -7,13 +7,24 @@ from __future__ import annotations
 
 import re
 
-# 创作者面板（/dashboard/）4 个顶线指标：标签 → 输出 key
+# 创作者面板（/dashboard/）4 个顶线指标：标签 → 输出 key。
+# 2026-06 起 LinkedIn 给标签加了后缀（"Post impressions in 7 days"、"Search appearances Jun 16–22"）
+# 并把 "Followers" 改成 "Total followers"，所以按前缀匹配，别名全列出。
 DASHBOARD_LABELS = {
     "Post impressions": "post_impressions",
+    "Total followers": "followers",
     "Followers": "followers",
     "Profile viewers": "profile_viewers",
     "Search appearances": "search_appearances",
 }
+
+
+def _dashboard_key(line: str) -> str | None:
+    """标签行 → 指标 key；精确或前缀（标签后跟空格的后缀）命中。"""
+    for label, key in DASHBOARD_LABELS.items():
+        if line == label or line.startswith(label + " "):
+            return key
+    return None
 
 
 def _to_int(s: str) -> int | None:
@@ -47,7 +58,7 @@ def parse_dashboard(text: str) -> dict:
     context = {key: "" for key in DASHBOARD_LABELS.values()}
     scan = lines[start:]
     for i, line in enumerate(scan):
-        key = DASHBOARD_LABELS.get(line)
+        key = _dashboard_key(line)
         if key is None or metrics[key] is not None:
             continue
         if i > 0:

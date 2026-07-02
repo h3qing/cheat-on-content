@@ -56,6 +56,39 @@ def test_parse_dashboard_missing_is_none():
     assert all(v is None for v in r["metrics"].values())
 
 
+# 2026-06 版式漂移：标签带后缀（"Post impressions in 7 days"）、"Total followers"，
+# 且没有 "Analytics & tools" 锚（页面改成 Overview / Track performance）
+SAMPLE_2026_06 = """Overview
+Track performance
+4,842
+Post impressions in 7 days
+75%
+vs. prior 7 days
+6,788
+Total followers
+13%
+vs. prior 7 days
+2,286
+Profile viewers in 90 days
+105%
+vs. prior 7 days
+105
+Search appearances Jun 16–22
+0%
+vs. Jun 9–15
+Weekly progress
+"""
+
+
+def test_parse_dashboard_2026_06_layout():
+    r = parse_dashboard(SAMPLE_2026_06)
+    m = r["metrics"]
+    assert m["post_impressions"] == 4842, m
+    assert m["followers"] == 6788, m
+    assert m["profile_viewers"] == 2286, m
+    assert m["search_appearances"] == 105, m
+
+
 POST_SAMPLE = """Heqing Huangさんが投稿しました • 4日
 post body with a stray number 123 inside
 調査

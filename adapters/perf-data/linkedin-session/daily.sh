@@ -22,8 +22,10 @@ fi
 JOBLOG="/Users/heqinghuang/Media/cheat-on-content/adapters/content-pipeline/joblog.py"
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "===== $(date '+%Y-%m-%d %H:%M:%S') ====="
-OUT="$( "$PY" "$ADAPTER/review.py" pull 2>&1; "$PY" "$ADAPTER/review.py" posts --limit="$LIMIT" 2>&1 )"
-RC=$?
+PULL_OUT="$( "$PY" "$ADAPTER/review.py" pull 2>&1 )"; PULL_RC=$?
+POSTS_OUT="$( "$PY" "$ADAPTER/review.py" posts --limit="$LIMIT" 2>&1 )"; POSTS_RC=$?
+OUT="$PULL_OUT"$'\n'"$POSTS_OUT"
+RC=$(( PULL_RC != 0 ? PULL_RC : POSTS_RC ))
 printf '%s\n' "$OUT"
 echo "===== done ====="
 
