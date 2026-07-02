@@ -55,6 +55,18 @@ def bucket_of(impressions: int) -> str:
     return "<4k"
 
 
+def bucket_for_composite(composite: float) -> str:
+    """rubric.md「Predicted reach buckets」表：composite → 预测档。跟 RUBRIC_WEIGHTS 一样
+    与 rubric.md 手工同步（改表时两边一起改）。"""
+    if composite >= 7.5:
+        return "30k+"
+    if composite >= 6.0:
+        return "12–30k"
+    if composite >= 4.8:
+        return "4–12k"
+    return "<4k"
+
+
 def _canonical_bucket(label):
     """Normalize dash variants (hyphen-minus, em-dash) to the canonical en-dash used in
     BUCKETS, so a hyphen-typed "12-30k" settles identically to the canonical "12–30k".
@@ -101,7 +113,7 @@ def predict(bet: dict) -> dict:
         "rubric_version": version,
         "dimension_scores": bet["dimension_scores"],
         "composite": composite,
-        "predicted_bucket": _canonical_bucket(bet.get("predicted_bucket")) or bucket_of(0),
+        "predicted_bucket": _canonical_bucket(bet.get("predicted_bucket")) or bucket_for_composite(composite),
         "predicted_at": _now(),
         "notes": bet.get("notes"),
     }

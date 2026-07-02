@@ -30,6 +30,16 @@ def test_bucket_boundaries():
     assert predict.bucket_of(0) == "<4k"
 
 
+def test_bucket_for_composite_matches_rubric_table():
+    # rubric v1 "Predicted reach buckets": ≥7.5→30k+, 6.0–7.4→12–30k, 4.8–5.9→4–12k, <4.8→<4k
+    assert predict.bucket_for_composite(7.5) == "30k+"
+    assert predict.bucket_for_composite(7.33) == "12–30k"
+    assert predict.bucket_for_composite(6.0) == "12–30k"
+    assert predict.bucket_for_composite(5.87) == "4–12k"
+    assert predict.bucket_for_composite(4.8) == "4–12k"
+    assert predict.bucket_for_composite(4.79) == "<4k"
+
+
 def test_canonical_bucket_normalizes_dashes():
     canon_mid = predict.bucket_of(13_291)  # "12–30k" — en-dash sourced from source-of-truth
     # hyphen-minus and em-dash both fold to the canonical en-dash
