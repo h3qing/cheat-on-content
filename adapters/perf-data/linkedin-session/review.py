@@ -37,7 +37,7 @@ def main() -> None:
         metrics = result.get("metrics") or {}
         if not any(v is not None for v in metrics.values()):
             print("❌ 没抽到任何指标，终止（未写库）")
-            return
+            raise SystemExit(1)
         import sink_supabase
         if dry:
             row = sink_supabase.build_profile_stats_row(result)
